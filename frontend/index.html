@@ -41,7 +41,7 @@ body{font-family:'Helvetica Neue',Helvetica,'PingFang SC','Microsoft YaHei',Aria
 <div id="app"></div>
 <script>
 const {createApp,ref,reactive,computed,onMounted}=Vue;
-const {createRouter,createWebHashRoute}=VueRouter;
+const {createRouter,createWebHashHistory}=VueRouter;
 const {ElMessage,ElMessageBox}=ElementPlus;
 const API_BASE='http://localhost:8000/api';
 
@@ -54,7 +54,7 @@ const useAuth=()=>{
  const token=ref(localStorage.getItem('token')||'');
  const isAdmin=computed(()=>user.value?.role==='admin');
  const load=async()=>{if(!token.value)return;try{const r=await api.get('/auth/me');user.value=r.data;}catch{token.value='';localStorage.removeItem('token');}};
- const login=async(u,p)=>{const r=await api.post('/auth/login',{username:u,password:p});token.value=r.data.access_token;localStorage.setItem('token',token.value);await load();};
+ const login=async(u,p)=>{const fd=new FormData();fd.append('username',u);fd.append('password',p);const r=await api.post('/auth/login',fd,{headers:{'Content-Type':'multipart/form-data'}});token.value=r.data.access_token;localStorage.setItem('token',token.value);await load();};
  const logout=()=>{token.value='';user.value=null;localStorage.removeItem('token');};
  return {user,token,isAdmin,load,login,logout};
 };
@@ -397,7 +397,7 @@ const routes=[
   {path:'dashboard',component:Dashboard},
  ]}
 ];
-const router=createRouter({history:createWebHashRoute(),routes});
+const router=createRouter({history:createWebHashHistory(),routes});
 router.beforeEach((to,from,next)=>{const t=localStorage.getItem('token');if(!to.meta.public&&!t){next('/login');}else{next();}});
 
 const App={setup(){const auth=useAuth();onMounted(()=>auth.load());return {};},template:'<router-view></router-view>'};
