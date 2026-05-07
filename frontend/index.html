@@ -186,6 +186,12 @@ const TaskNew={
     <el-form-item label="优先级">
      <el-select v-model="form.priority"><el-option label="P0" value="P0"/><el-option label="P1" value="P1"/><el-option label="P2" value="P2"/><el-option label="P3" value="P3"/></el-select>
     </el-form-item>
+    <el-form-item label="状态">
+     <el-select v-model="form.status">
+      <el-option label="草稿" value="draft"/><el-option label="待认领" value="open"/><el-option label="进行中" value="in_progress"/>
+      <el-option label="待验收" value="pending_review"/><el-option label="已完成" value="done"/><el-option label="已挂起" value="blocked"/>
+     </el-select>
+    </el-form-item>
     <el-form-item label="预估工时"><el-input-number v-model="form.estimated_hours" :min="0"/></el-form-item>
     <el-form-item label="标签"><el-input v-model="form.tags" placeholder="逗号分隔，如前端,Vue"/></el-form-item>
     <el-form-item label="期望完成"><el-date-picker v-model="form.deadline" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss"/></el-form-item>
@@ -197,7 +203,7 @@ const TaskNew={
   </div>
  </div>`,
  setup(){
-  const form=reactive({title:'',description:'',task_type:'feature',priority:'P2',estimated_hours:null,tags:'',deadline:null});
+  const form=reactive({title:'',description:'',task_type:'feature',priority:'P2',estimated_hours:null,tags:'',deadline:null,status:'open'});
   const submit=async()=>{if(!form.title){ElMessage.warning('请填写标题');return;}await api.post('/tasks',form);ElMessage.success('创建成功');location.hash='/';};
   return {form,submit};
  }

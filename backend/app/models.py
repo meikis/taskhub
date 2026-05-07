@@ -91,40 +91,46 @@ class Task(TaskBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     creator_id: int = Field(foreign_key="user.id")
     assignee_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    parent_id: Optional[int] = Field(default=None, foreign_key="task.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     claimed_at: Optional[datetime] = Field(default=None)
     completed_at: Optional[datetime] = Field(default=None)
 
 class TaskCreate(SQLModel):
     title: str
-    description: Optional[str] = None
-    task_type: TaskType = TaskType.OTHER
-    priority: Priority = Priority.P2
-    status: Optional[TaskStatus] = None
-    department: Optional[str] = None
-    estimated_hours: Optional[int] = None
-    tags: Optional[str] = None
-    deadline: Optional[datetime] = None
+    description: Optional[str] = Field(default=None)
+    task_type: TaskType = Field(default=TaskType.OTHER)
+    priority: Priority = Field(default=Priority.P2)
+    status: Optional[TaskStatus] = Field(default=None)
+    department: Optional[str] = Field(default=None)
+    estimated_hours: Optional[int] = Field(default=None)
+    tags: Optional[str] = Field(default=None)
+    deadline: Optional[datetime] = Field(default=None)
+    parent_id: Optional[int] = Field(default=None)
 
 class TaskUpdate(SQLModel):
     title: Optional[str] = None
     description: Optional[str] = None
+    task_type: Optional[TaskType] = None
     priority: Optional[Priority] = None
     status: Optional[TaskStatus] = None
     assignee_id: Optional[int] = None
     estimated_hours: Optional[int] = None
     tags: Optional[str] = None
     deadline: Optional[datetime] = None
+    parent_id: Optional[int] = None
 
 class TaskRead(TaskBase):
     id: int
     creator_id: int
     assignee_id: Optional[int]
+    parent_id: Optional[int] = None
     created_at: datetime
     claimed_at: Optional[datetime]
     completed_at: Optional[datetime]
     creator: Optional[UserRead] = None
     assignee: Optional[UserRead] = None
+    subtasks: Optional[List["TaskRead"]] = None
 
 # ========== 操作日志 ==========
 class TaskLog(SQLModel, table=True):
