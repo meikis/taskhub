@@ -56,11 +56,47 @@ def patch_task(task_id: int, data: TaskUpdate, db: Session = Depends(get_session
     task = get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    old_status = task.status
+    old_data = {k: getattr(task, k) for k in ['title', 'description', 'priority', 'status', 'assignee_id', 'estimated_hours', 'tags', 'deadline', 'parent_id']}
     task = update_task(db, task, data)
-    if data.status and data.status != old_status:
-        create_task_log(db, task.id, current_user.id, "更新状态", from_status=old_status, to_status=data.status)
+    changes = []
+    new_data = {k: getattr(task, k) for k in ['title', 'description', 'priority', 'status', 'assignee_id', 'estimated_hours', 'tags', 'deadline', 'parent_id']}
+    field_names = {'title':'标题','description':'描述','priority':'优先级','status':'状态','assignee_id':'负责人','estimated_hours':'预估工时','tags':'标签','deadline':'截止日期','parent_id':'父任务'}
+    for key in old_data:
+        if old_data[key] != new_data[key]:
+            old_val = str(old_data[key]) if old_data[key] is not None else '无'
+            new_val = str(new_data[key]) if new_data[key] is not None else '无'
+            changes.append(f"{field_names.get(key,key)}: {old_val} → {new_val}")
+    if changes:
+        create_task_log(db, task.id, current_user.id, "修改任务", comment="; ".join(changes))
+    if data.status and data.status != old_data['status']:
+        create_task_log(db, task.id, current_user.id, "更新状态", from_status=str(old_data['status']), to_status=str(data.status))
     return enrich_task(db, task)
+
+@router.delete("/{task_id}")
+def delete_task(task_id: int, db: Session = Depends(get_session), current_user: UserRead = Depends(get_current_user)):
+    task = get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.creator_id != current_user.id and current_user.role != 'admin':
+        raise HTTPException(status_code=403, detail="只有创建者或管理员可以删除任务")
+    from sqlmodel import select
+    subtasks = db.exec(select(Task).where(Task.parent_id == task_id)).all()
+    for st in subtasks:
+        st.parent_id = None
+        db.add(st)
+    create_task_log(db, task.id, current_user.id, "删除任务", comment=f"删除了任务: {task.title}")
+    db.delete(task)
+    db.commit()
+    return {"message": "任务删除成功"}
+
+@router.get("/{task_id}/subtasks", response_model=List[TaskRead])
+def get_subtasks(task_id: int, db: Session = Depends(get_session), current_user: UserRead = Depends(get_current_user)):
+    task = get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    from sqlmodel import select
+    subtasks = db.exec(select(Task).where(Task.parent_id == task_id)).all()
+    return [enrich_task(db, st) for st in subtasks]
 
 @router.get("/{task_id}/logs", response_model=List[TaskLogRead])
 def get_logs(task_id: int, db: Session = Depends(get_session)):
@@ -73,7 +109,13 @@ def get_logs(task_id: int, db: Session = Depends(get_session)):
     return result
 
 def enrich_task(db: Session, task):
+    from sqlmodel import select
     tr = TaskRead.model_validate(task)
     tr.creator = UserRead.model_validate(get_user_by_id(db, task.creator_id)) if get_user_by_id(db, task.creator_id) else None
     tr.assignee = UserRead.model_validate(get_user_by_id(db, task.assignee_id)) if task.assignee_id and get_user_by_id(db, task.assignee_id) else None
+    if task.id is not None:
+        subtasks = db.exec(select(Task).where(Task.parent_id == task.id)).all()
+        tr.subtasks = [enrich_task(db, st) for st in subtasks] if subtasks else []
+    else:
+        tr.subtasks = []
     return tr

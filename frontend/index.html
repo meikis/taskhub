@@ -38,8 +38,18 @@ body{font-family:'Helvetica Neue',Helvetica,'PingFang SC','Microsoft YaHei',Aria
 .board-col h3{font-size:14px;margin-bottom:10px;color:#606266}
 .board-card .title{font-weight:600;margin-bottom:6px;font-size:14px}
 .board-card .meta{font-size:12px;color:#909399;display:flex;justify-content:space-between}
+.board-card .subtask-hint{font-size:11px;color:#909399;margin-top:4px}
+.board-card .subtask-hint span{margin-right:8px}
+.board-card .subtask-progress{display:inline-block;width:60px;height:4px;background:#e4e7ed;border-radius:2px;vertical-align:middle;margin-left:4px}
+.board-card .subtask-progress-bar{display:inline-block;height:100%;background:#67c23a;border-radius:2px}
 .login-wrap{height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#667eea,#764ba2)}
 .login-box{width:400px;background:#fff;padding:40px;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15)}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}
+.modal-box{background:#fff;border-radius:8px;padding:24px;width:90%;max-width:600px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.modal-header h3{margin:0;font-size:18px}
+.modal-close{background:none;border:none;font-size:24px;cursor:pointer;color:#909399;padding:0;line-height:1}
+.modal-close:hover{color:#409eff}
 </style>
 </head>
 <body>
@@ -96,7 +106,7 @@ const TaskBoard={
     <el-option label="P0" value="P0"/><el-option label="P1" value="P1"/><el-option label="P2" value="P2"/><el-option label="P3" value="P3"/>
    </el-select>
    <el-button type="primary" @click="load">查询</el-button>
-   <el-button type="success" @click="$router.push('/tasks/new')">+ 新建任务</el-button>
+   <el-button type="success" @click="showCreateModal=true">+ 新建任务</el-button>
   </div>
   <div class="board">
    <div class="board-col" v-for="col in columns" :key="col.status" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop($event,col.status)">
@@ -104,7 +114,58 @@ const TaskBoard={
     <div class="board-card" :class="{draggable:canDrag(t),dragging:dragTask?.id===t.id}" v-for="t in col.list" :key="t.id" :draggable="canDrag(t)" @click="$router.push('/tasks/'+t.id)" @dragstart="onDragStart($event,t)" @dragend="onDragEnd">
      <div class="title">{{t.title}}</div>
      <div class="meta"><span>{{t.priority}}</span><span>{{t.task_type}}</span></div>
+     <div class="subtask-hint" v-if="t.subtaskCount>0">
+      <span>📎 {{t.subtaskCount}}个子任务</span>
+      <span v-if="t.subtaskCount>0">
+       <span class="subtask-progress">
+        <span class="subtask-progress-bar" :style="{width:(t.subtaskDone/t.subtaskCount*100)+'%'}"></span>
+       </span>
+       {{t.subtaskDone}}/{{t.subtaskCount}}
+      </span>
+     </div>
     </div>
+   </div>
+  </div>
+  <div class="modal-overlay" v-if="showCreateModal" @click.self>
+   <div class="modal-box">
+    <div class="modal-header">
+     <h3>新建任务</h3>
+     <button class="modal-close" @click="closeModal">&times;</button>
+    </div>
+    <el-form label-width="100px">
+     <el-form-item label="标题">
+      <el-autocomplete v-model="form.title" :fetch-suggestions="searchTemplates" placeholder="输入任务标题" @select="applyTemplate" style="width:100%">
+       <template #default="item">{{item.value}}</template>
+      </el-autocomplete>
+     </el-form-item>
+     <el-form-item label="描述"><el-input v-model="form.description" type="textarea" rows="4"/></el-form-item>
+     <el-form-item label="类型">
+      <el-select v-model="form.task_type">
+       <el-option label="Bug修复" value="bug"/><el-option label="新功能" value="feature"/>
+       <el-option label="技术债" value="tech_debt"/><el-option label="调研" value="research"/><el-option label="其他" value="other"/>
+      </el-select>
+     </el-form-item>
+     <el-form-item label="优先级">
+      <el-select v-model="form.priority">
+       <el-option label="P0" value="P0"/><el-option label="P1" value="P1"/>
+       <el-option label="P2" value="P2"/><el-option label="P3" value="P3"/>
+      </el-select>
+     </el-form-item>
+     <el-form-item label="状态">
+      <el-select v-model="form.status">
+       <el-option label="草稿" value="draft"/><el-option label="待认领" value="open"/>
+       <el-option label="进行中" value="in_progress"/><el-option label="待验收" value="pending_review"/>
+       <el-option label="已完成" value="done"/><el-option label="已挂起" value="blocked"/>
+      </el-select>
+     </el-form-item>
+     <el-form-item label="预估工时"><el-input-number v-model="form.estimated_hours" :min="0"/></el-form-item>
+     <el-form-item label="标签"><el-input v-model="form.tags" placeholder="逗号分隔"/></el-form-item>
+     <el-form-item label="截止日期"><el-date-picker v-model="form.deadline" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width:100%"/></el-form-item>
+     <el-form-item>
+      <el-button type="primary" @click="submitTask">创建</el-button>
+      <el-button @click="closeModal">取消</el-button>
+     </el-form-item>
+    </el-form>
    </div>
   </div>
  </div>`,
@@ -114,7 +175,20 @@ const TaskBoard={
   const auth=useAuth();
   const dragTask=ref(null);
   const dragOverCol=ref(null);
-  const load=async()=>{const p={};if(filter.status)p.status=filter.status;if(filter.priority)p.priority=filter.priority;if(filter.keyword)p.keyword=filter.keyword;const r=await api.get('/tasks',{params:p});list.value=r.data;};
+  const showCreateModal=ref(false);
+  const form=reactive({title:'',description:'',task_type:'feature',priority:'P2',status:'open',estimated_hours:null,tags:'',deadline:null});
+  const load=async()=>{
+   const p={};
+   if(filter.status)p.status=filter.status;
+   if(filter.priority)p.priority=filter.priority;
+   if(filter.keyword)p.keyword=filter.keyword;
+   const r=await api.get('/tasks',{params:p});
+   list.value=r.data.map(t=>{
+    const subs=t.subtasks||[];
+    const done=subs.filter(s=>s.status==='done').length;
+    return {...t,subtaskCount:subs.length,subtaskDone:done};
+   });
+  };
   const columns=computed(()=>[
    {label:'待认领',status:'open',list:list.value.filter(x=>x.status==='open')},
    {label:'进行中',status:'in_progress',list:list.value.filter(x=>x.status==='in_progress')},
@@ -125,6 +199,7 @@ const TaskBoard={
   const canDrag=(t)=>{
    if(!auth.user.value)return false;
    if(auth.isAdmin.value)return true;
+   if(t.creator_id===auth.user.value.id)return true;
    if(t.assignee_id===auth.user.value.id){
     if(['in_progress','open','blocked'].includes(t.status))return true;
    }
@@ -168,17 +243,51 @@ const TaskBoard={
    }
    dragTask.value=null;
   };
+  const resetForm=()=>{form.title='';form.description='';form.task_type='feature';form.priority='P2';form.status='open';form.estimated_hours=null;form.tags='';form.deadline=null;};
+  const closeModal=()=>{showCreateModal.value=false;resetForm();};
+  const submitTask=async()=>{
+   if(!form.title){ElMessage.warning('请填写标题');return;}
+   try{await api.post('/tasks',form);ElMessage.success('创建成功');closeModal();load();}catch(e){ElMessage.error('创建失败: '+(e.response?.data?.detail||e.message));}
+  };
+  const searchTemplates=(query,cb)=>{
+   if(!query){cb([]);return;}
+   const results=taskTemplates.filter(t=>t.title.toLowerCase().includes(query.toLowerCase())).map(t=>({value:t.title,...t}));
+   cb(results.slice(0,5));
+  };
+  const applyTemplate=(item)=>{
+   if(item.description)form.description=item.description.replace(/\\n/g,'\n');
+   if(item.task_type)form.task_type=item.task_type;
+   if(item.priority)form.priority=item.priority;
+   if(item.tags)form.tags=item.tags;
+  };
   onMounted(load);
-  return {list,filter,load,columns,dragTask,canDrag,onDragStart,onDragEnd,onDragOver,onDragLeave,onDrop};
+  return {list,filter,load,columns,dragTask,canDrag,onDragStart,onDragEnd,onDragOver,onDragLeave,onDrop,showCreateModal,form,closeModal,submitTask,searchTemplates,applyTemplate};
  }
 };
+
+const taskTemplates=[
+ {title:'实现用户登录功能',task_type:'feature',priority:'P1',tags:'前端,登录,Auth',description:'实现用户注册、登录、登出功能\\n1. 用户注册页面\\n2. 用户登录页面\\n3. JWT Token 处理\\n4. 登录状态保持'},
+ {title:'修复Bug',task_type:'bug',priority:'P0',tags:'Bug',description:'问题描述：\\n复现步骤：\\n预期行为：\\n实际行为：'},
+ {title:'代码重构',task_type:'tech_debt',priority:'P2',tags:'重构,代码质量',description:'重构目标：\\n影响范围：\\n预期收益：'},
+ {title:'性能优化',task_type:'tech_debt',priority:'P2',tags:'性能,优化',description:'优化目标：\\n当前性能指标：\\n目标性能指标：'},
+ {title:'API接口开发',task_type:'feature',priority:'P1',tags:'后端,API',description:'接口说明：\\n请求参数：\\n返回数据：'},
+ {title:'前端组件开发',task_type:'feature',priority:'P2',tags:'前端,组件',description:'组件说明：\\n功能列表：\\nProps：'},
+ {title:'数据库设计',task_type:'feature',priority:'P1',tags:'后端,数据库',description:'表结构：\\n字段说明：\\n索引设计：'},
+ {title:'技术调研',task_type:'research',priority:'P3',tags:'调研',description:'调研目标：\\n调研内容：\\n预期结论：'},
+ {title:'编写单元测试',task_type:'tech_debt',priority:'P2',tags:'测试,单元测试',description:'测试范围：\\n覆盖率目标：\\n测试用例：'},
+ {title:'编写文档',task_type:'other',priority:'P3',tags:'文档',description:'文档目标：\\n文档结构：\\n待输出：'},
+];
 
 const TaskNew={
  template:`<div class="container">
   <div class="page-title">新建任务</div>
   <div class="card" style="max-width:700px">
    <el-form label-width="100px">
-    <el-form-item label="标题"><el-input v-model="form.title"/></el-form-item>
+    <el-form-item label="标题">
+     <el-autocomplete v-model="form.title" :fetch-suggestions="searchTemplates" placeholder="输入任务标题" @select="applyTemplate" style="width:100%">
+      <template #default="item">{{item.value}}</template>
+     </el-autocomplete>
+    </el-form-item>
     <el-form-item label="描述"><el-input v-model="form.description" type="textarea" rows="4"/></el-form-item>
     <el-form-item label="类型">
      <el-select v-model="form.task_type"><el-option label="Bug修复" value="bug"/><el-option label="新功能" value="feature"/><el-option label="技术债" value="tech_debt"/><el-option label="调研" value="research"/><el-option label="其他" value="other"/></el-select>
@@ -204,14 +313,25 @@ const TaskNew={
  </div>`,
  setup(){
   const form=reactive({title:'',description:'',task_type:'feature',priority:'P2',estimated_hours:null,tags:'',deadline:null,status:'open'});
+  const searchTemplates=(query,cb)=>{
+   if(!query){cb([]);return;}
+   const results=taskTemplates.filter(t=>t.title.toLowerCase().includes(query.toLowerCase())).map(t=>({value:t.title,...t}));
+   cb(results.slice(0,5));
+  };
+  const applyTemplate=(item)=>{
+   if(item.description)form.description=item.description.replace(/\\n/g,'\n');
+   if(item.task_type)form.task_type=item.task_type;
+   if(item.priority)form.priority=item.priority;
+   if(item.tags)form.tags=item.tags;
+  };
   const submit=async()=>{if(!form.title){ElMessage.warning('请填写标题');return;}await api.post('/tasks',form);ElMessage.success('创建成功');location.hash='/';};
-  return {form,submit};
+  return {form,searchTemplates,applyTemplate,submit};
  }
 };
 
 const TaskDetail={
  template:`<div class="container">
-  <div class="page-title">任务详情 #{{task.id}}</div>
+  <div class="page-title">任务详情 #{{task.id}} <el-button size="small" @click="openEdit" style="margin-left:12px">编辑任务</el-button> <el-button size="small" type="danger" @click="deleteTask" style="margin-left:12px">删除任务</el-button></div>
   <div class="card">
    <h3 style="margin-bottom:12px">{{task.title}}</h3>
    <p style="color:#606266;margin-bottom:12px;white-space:pre-wrap">{{task.description||'暂无描述'}}</p>
@@ -220,6 +340,7 @@ const TaskDetail={
     <el-tag type="info">{{task.task_type}}</el-tag>
     <el-tag :type="statusType">{{statusLabel}}</el-tag>
     <span v-if="task.assignee">负责人: {{task.assignee.display_name}}</span>
+    <span v-if="task.parent_id" style="color:#909399">子任务</span>
    </div>
    <div style="margin-bottom:12px">
     <el-button v-if="canClaim" type="primary" @click="claim">认领任务</el-button>
@@ -231,6 +352,26 @@ const TaskDetail={
    </div>
   </div>
   <div class="card">
+   <h4 style="margin-bottom:10px">子任务 <span v-if="task.subtasks&&task.subtasks.length" style="font-weight:normal;color:#909399">- {{subtaskDone}}/{{task.subtasks.length}} 完成</span> <el-button size="small" type="primary" @click="showAddSubtask=true" style="margin-left:12px">+ 添加子任务</el-button></h4>
+   <div v-if="showAddSubtask" style="margin-bottom:12px;padding:12px;background:#f5f7fa;border-radius:4px">
+    <el-input v-model="newSubtaskTitle" placeholder="子任务标题" style="margin-bottom:8px"/>
+    <el-button size="small" type="primary" @click="addSubtask">添加</el-button>
+    <el-button size="small" @click="showAddSubtask=false">取消</el-button>
+   </div>
+   <div v-if="task.subtasks&&task.subtasks.length" style="margin-bottom:12px">
+    <el-progress :percentage="subtaskProgress" :stroke-width="8"/>
+   </div>
+   <div v-if="task.subtasks&&task.subtasks.length" style="display:flex;flex-direction:column;gap:8px">
+    <div v-for="st in task.subtasks" :key="st.id" style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:#fafafa;border-radius:4px;cursor:pointer" @click="$router.push('/tasks/'+st.id)">
+     <span :style="{color:st.status==='done'?'#67c23a':'#909399',fontSize:'16px'}">{{st.status==='done'?'✓':'○'}}</span>
+     <span style="flex:1">{{st.title}}</span>
+     <el-tag size="small">{{st.priority}}</el-tag>
+     <span style="color:#909399;font-size:12px">{{statusMap[st.status]||st.status}}</span>
+    </div>
+   </div>
+   <el-empty v-else description="暂无子任务，点击上方按钮添加子任务"/>
+  </div>
+  <div class="card">
    <h4 style="margin-bottom:10px">操作记录</h4>
    <el-timeline>
     <el-timeline-item v-for="log in logs" :key="log.id" :timestamp="log.created_at">
@@ -238,14 +379,60 @@ const TaskDetail={
     </el-timeline-item>
    </el-timeline>
   </div>
+  <div class="modal-overlay" v-if="showEditModal" @click.self>
+   <div class="modal-box">
+    <div class="modal-header">
+     <h3>编辑任务</h3>
+     <button class="modal-close" @click="closeEdit">&times;</button>
+    </div>
+    <el-form label-width="100px">
+     <el-form-item label="标题"><el-input v-model="editForm.title"/></el-form-item>
+     <el-form-item label="描述"><el-input v-model="editForm.description" type="textarea" rows="4"/></el-form-item>
+     <el-form-item label="类型">
+      <el-select v-model="editForm.task_type">
+       <el-option label="Bug修复" value="bug"/><el-option label="新功能" value="feature"/>
+       <el-option label="技术债" value="tech_debt"/><el-option label="调研" value="research"/><el-option label="其他" value="other"/>
+      </el-select>
+     </el-form-item>
+     <el-form-item label="优先级">
+      <el-select v-model="editForm.priority">
+       <el-option label="P0" value="P0"/><el-option label="P1" value="P1"/>
+       <el-option label="P2" value="P2"/><el-option label="P3" value="P3"/>
+      </el-select>
+     </el-form-item>
+     <el-form-item label="状态">
+      <el-select v-model="editForm.status">
+       <el-option label="草稿" value="draft"/><el-option label="待认领" value="open"/>
+       <el-option label="进行中" value="in_progress"/><el-option label="待验收" value="pending_review"/>
+       <el-option label="已完成" value="done"/><el-option label="已挂起" value="blocked"/>
+      </el-select>
+     </el-form-item>
+     <el-form-item label="预估工时"><el-input-number v-model="editForm.estimated_hours" :min="0"/></el-form-item>
+     <el-form-item label="标签"><el-input v-model="editForm.tags" placeholder="逗号分隔"/></el-form-item>
+     <el-form-item label="截止日期"><el-date-picker v-model="editForm.deadline" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width:100%"/></el-form-item>
+     <el-form-item>
+      <el-button type="primary" @click="saveEdit">保存修改</el-button>
+      <el-button @click="closeEdit">取消</el-button>
+     </el-form-item>
+    </el-form>
+   </div>
+  </div>
  </div>`,
  setup(){
   const task=ref({});const logs=ref([]);const auth=useAuth();
+  const showEditModal=ref(false);
+  const showAddSubtask=ref(false);
+  const newSubtaskTitle=ref('');
+  const editForm=reactive({title:'',description:'',task_type:'feature',priority:'P2',status:'open',estimated_hours:null,tags:'',deadline:null});
   const load=async()=>{const id=router.currentRoute.value.params.id;const r=await api.get('/tasks/'+id);task.value=r.data;const lr=await api.get('/tasks/'+id+'/logs');logs.value=lr.data;};
   const statusMap={draft:'草稿',open:'待认领',in_progress:'进行中',pending_review:'待验收',done:'已完成',blocked:'已挂起',abandoned:'已放弃',rejected:'已驳回'};
   const statusLabel=computed(()=>statusMap[task.value.status]||task.value.status);
   const statusType=computed(()=>{const s=task.value.status;if(s==='done')return 'success';if(s==='in_progress')return 'warning';if(s==='blocked'||s==='abandoned'||s==='rejected')return 'danger';return '';});
+  const subtaskDone=computed(()=>(task.value.subtasks||[]).filter(s=>s.status==='done').length);
+  const subtaskProgress=computed(()=>{const total=task.value.subtasks?.length||0;return total>0?Math.round(subtaskDone.value/total*100):0;});
   const isMine=computed(()=>task.value.assignee_id===auth.user.value?.id);
+  const isOwner=computed(()=>task.value.creator_id===auth.user.value?.id);
+  const canEdit=computed(()=>auth.isAdmin.value||isOwner.value);
   const canClaim=computed(()=>task.value.status==='open');
   const canStart=computed(()=>task.value.status==='open'&&isMine.value);
   const canReview=computed(()=>task.value.status==='in_progress'&&isMine.value);
@@ -254,26 +441,133 @@ const TaskDetail={
   const canAbandon=computed(()=>['in_progress','open'].includes(task.value.status)&&isMine.value);
   const claim=async()=>{await api.post('/tasks/'+task.value.id+'/claim');ElMessage.success('认领成功');load();};
   const updateStatus=async(s)=>{await api.patch('/tasks/'+task.value.id,{status:s});ElMessage.success('状态更新成功');load();};
+  const openEdit=()=>{
+   editForm.title=task.value.title;
+   editForm.description=task.value.description||'';
+   editForm.task_type=task.value.task_type;
+   editForm.priority=task.value.priority;
+   editForm.status=task.value.status;
+   editForm.estimated_hours=task.value.estimated_hours;
+   editForm.tags=task.value.tags||'';
+   editForm.deadline=task.value.deadline;
+   showEditModal.value=true;
+  };
+  const closeEdit=()=>{showEditModal.value=false;};
+  const saveEdit=async()=>{
+   try{await api.patch('/tasks/'+task.value.id,editForm);ElMessage.success('保存成功');showEditModal.value=false;load();}catch(e){ElMessage.error('保存失败: '+(e.response?.data?.detail||e.message));}
+  };
+  const addSubtask=async()=>{
+   if(!newSubtaskTitle.value.trim()){ElMessage.warning('请输入子任务标题');return;}
+   try{await api.post('/tasks',{title:newSubtaskTitle.value,parent_id:task.value.id,status:'open'});ElMessage.success('子任务添加成功');newSubtaskTitle.value='';showAddSubtask.value=false;load();}catch(e){ElMessage.error('添加失败: '+(e.response?.data?.detail||e.message));}
+  };
+  const deleteTask=async()=>{
+   if(!confirm('确定要删除此任务吗？子任务将保留但不再关联此父任务。'))return;
+   try{await api.delete('/tasks/'+task.value.id);ElMessage.success('删除成功');location.hash='/';}catch(e){ElMessage.error('删除失败: '+(e.response?.data?.detail||e.message));}
+  };
   onMounted(load);
-  return {task,logs,statusLabel,statusType,canClaim,canStart,canReview,canDone,canBlock,canAbandon,claim,updateStatus};
+  return {task,logs,statusLabel,statusType,statusMap,subtaskDone,subtaskProgress,canClaim,canStart,canReview,canDone,canBlock,canAbandon,canEdit,claim,updateStatus,showEditModal,editForm,openEdit,closeEdit,saveEdit,showAddSubtask,newSubtaskTitle,addSubtask,deleteTask};
  }
 };
 
 const MyTasks={
  template:`<div class="container">
-  <div class="page-title">我的任务</div>
+  <div class="page-title">我的任务 <el-button type="primary" @click="showCreateModal=true" style="margin-left:12px">+ 新建任务</el-button></div>
   <div class="card">
    <el-tabs v-model="tab">
-    <el-tab-pane label="我创建的" name="created"><el-table :data="created"><el-table-column prop="title" label="标题"/><el-table-column prop="status" label="状态"/><el-table-column prop="priority" label="优先级"/></el-table></el-tab-pane>
-    <el-tab-pane label="我认领的" name="claimed"><el-table :data="claimed"><el-table-column prop="title" label="标题"/><el-table-column prop="status" label="状态"/><el-table-column prop="priority" label="优先级"/></el-table></el-tab-pane>
+    <el-tab-pane label="我创建的" name="created">
+     <el-table :data="created">
+      <el-table-column prop="title" label="标题"/>
+      <el-table-column prop="status" label="状态" width="100">
+       <template #default="s">{{statusMap[s.row.status]||s.row.status}}</template>
+      </el-table-column>
+      <el-table-column prop="priority" label="优先级" width="80"/>
+      <el-table-column label="操作" width="150">
+       <template #default="s">
+        <el-button size="small" @click="openEdit(s.row)">编辑</el-button>
+        <el-button size="small" type="danger" @click="deleteTask(s.row)">删除</el-button>
+       </template>
+      </el-table-column>
+     </el-table>
+    </el-tab-pane>
+    <el-tab-pane label="我认领的" name="claimed">
+     <el-table :data="claimed">
+      <el-table-column prop="title" label="标题"/>
+      <el-table-column prop="status" label="状态" width="100">
+       <template #default="s">{{statusMap[s.row.status]||s.row.status}}</template>
+      </el-table-column>
+      <el-table-column prop="priority" label="优先级" width="80"/>
+     </el-table>
+    </el-tab-pane>
    </el-tabs>
+  </div>
+  <div class="modal-overlay" v-if="showCreateModal||showEditModal" @click.self>
+   <div class="modal-box">
+    <div class="modal-header">
+     <h3>{{showEditModal?'编辑任务':'新建任务'}}</h3>
+     <button class="modal-close" @click="closeModal">&times;</button>
+    </div>
+    <el-form label-width="100px">
+     <el-form-item label="标题"><el-input v-model="form.title"/></el-form-item>
+     <el-form-item label="描述"><el-input v-model="form.description" type="textarea" rows="4"/></el-form-item>
+     <el-form-item label="类型">
+      <el-select v-model="form.task_type">
+       <el-option label="Bug修复" value="bug"/><el-option label="新功能" value="feature"/>
+       <el-option label="技术债" value="tech_debt"/><el-option label="调研" value="research"/><el-option label="其他" value="other"/>
+      </el-select>
+     </el-form-item>
+     <el-form-item label="优先级">
+      <el-select v-model="form.priority">
+       <el-option label="P0" value="P0"/><el-option label="P1" value="P1"/>
+       <el-option label="P2" value="P2"/><el-option label="P3" value="P3"/>
+      </el-select>
+     </el-form-item>
+     <el-form-item label="状态">
+      <el-select v-model="form.status">
+       <el-option label="草稿" value="draft"/><el-option label="待认领" value="open"/>
+       <el-option label="进行中" value="in_progress"/><el-option label="待验收" value="pending_review"/>
+       <el-option label="已完成" value="done"/><el-option label="已挂起" value="blocked"/>
+      </el-select>
+     </el-form-item>
+     <el-form-item label="预估工时"><el-input-number v-model="form.estimated_hours" :min="0"/></el-form-item>
+     <el-form-item label="标签"><el-input v-model="form.tags" placeholder="逗号分隔"/></el-form-item>
+     <el-form-item label="截止日期"><el-date-picker v-model="form.deadline" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width:100%"/></el-form-item>
+     <el-form-item>
+      <el-button type="primary" @click="submitForm">{{showEditModal?'保存':'创建'}}</el-button>
+      <el-button @click="closeModal">取消</el-button>
+     </el-form-item>
+    </el-form>
+   </div>
   </div>
  </div>`,
  setup(){
   const tab=ref('claimed');const created=ref([]);const claimed=ref([]);
+  const showCreateModal=ref(false);const showEditModal=ref(false);
+  const editId=ref(null);
+  const statusMap={draft:'草稿',open:'待认领',in_progress:'进行中',pending_review:'待验收',done:'已完成',blocked:'已挂起',abandoned:'已放弃'};
+  const form=reactive({title:'',description:'',task_type:'feature',priority:'P2',status:'open',estimated_hours:null,tags:'',deadline:null});
   const load=async()=>{const c=await api.get('/tasks',{params:{creator_id:1}});created.value=c.data;const cl=await api.get('/tasks',{params:{assignee_id:1}});claimed.value=cl.data;};
+  const resetForm=()=>{form.title='';form.description='';form.task_type='feature';form.priority='P2';form.status='open';form.estimated_hours=null;form.tags='';form.deadline=null;};
+  const openEdit=(task)=>{editId.value=task.id;form.title=task.title;form.description=task.description||'';form.task_type=task.task_type;form.priority=task.priority;form.status=task.status;form.estimated_hours=task.estimated_hours;form.tags=task.tags||'';form.deadline=task.deadline;showEditModal.value=true;};
+  const closeModal=()=>{showCreateModal.value=false;showEditModal.value=false;editId.value=null;resetForm();};
+  const submitForm=async()=>{
+   if(!form.title){ElMessage.warning('请填写标题');return;}
+   try{
+    if(showEditModal.value){
+     await api.patch('/tasks/'+editId.value,form);
+     ElMessage.success('保存成功');
+    }else{
+     await api.post('/tasks',form);
+     ElMessage.success('创建成功');
+    }
+    closeModal();load();
+   }catch(e){ElMessage.error((showEditModal.value?'保存':'创建')+'失败: '+(e.response?.data?.detail||e.message));}
+  };
+  const deleteTask=async(task)=>{
+   if(!confirm('确定要删除任务「'+task.title+'」吗？'))return;
+   try{await api.delete('/tasks/'+task.id);ElMessage.success('删除成功');load();}catch(e){ElMessage.error('删除失败: '+(e.response?.data?.detail||e.message));}
+  };
   onMounted(load);
-  return {tab,created,claimed};
+  return {tab,created,claimed,statusMap,showCreateModal,showEditModal,form,openEdit,closeModal,submitForm,deleteTask};
  }
 };
 

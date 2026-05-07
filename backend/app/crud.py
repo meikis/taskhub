@@ -39,6 +39,7 @@ def create_task(db: Session, task: TaskCreate, creator_id: int) -> Task:
         estimated_hours=task.estimated_hours,
         tags=task.tags,
         deadline=task.deadline,
+        parent_id=task.parent_id,
         creator_id=creator_id,
     )
     db.add(db_task)
