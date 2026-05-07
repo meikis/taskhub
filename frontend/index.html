@@ -31,6 +31,11 @@ body{font-family:'Helvetica Neue',Helvetica,'PingFang SC','Microsoft YaHei',Aria
 .board-col h3{font-size:14px;margin-bottom:10px;color:#606266}
 .board-card{background:#fff;border-radius:6px;padding:12px;margin-bottom:10px;cursor:pointer;transition:box-shadow .2s}
 .board-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.1)}
+.board-card.dragging{opacity:0.5;transform:scale(1.02);box-shadow:0 8px 16px rgba(0,0,0,.15)}
+.board-card.draggable{cursor:grab}
+.board-card.draggable:active{cursor:grabbing}
+.board-col.drag-over{background:#e6f7ff;border:2px dashed #1890ff;transition:background .2s,border .2s}
+.board-col h3{font-size:14px;margin-bottom:10px;color:#606266}
 .board-card .title{font-weight:600;margin-bottom:6px;font-size:14px}
 .board-card .meta{font-size:12px;color:#909399;display:flex;justify-content:space-between}
 .login-wrap{height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#667eea,#764ba2)}
@@ -94,9 +99,9 @@ const TaskBoard={
    <el-button type="success" @click="$router.push('/tasks/new')">+ 新建任务</el-button>
   </div>
   <div class="board">
-   <div class="board-col" v-for="col in columns" :key="col.status">
+   <div class="board-col" v-for="col in columns" :key="col.status" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop($event,col.status)">
     <h3>{{col.label}} ({{col.list.length}})</h3>
-    <div class="board-card" v-for="t in col.list" :key="t.id" @click="$router.push('/tasks/'+t.id)">
+    <div class="board-card" :class="{draggable:canDrag(t),dragging:dragTask?.id===t.id}" v-for="t in col.list" :key="t.id" :draggable="canDrag(t)" @click="$router.push('/tasks/'+t.id)" @dragstart="onDragStart($event,t)" @dragend="onDragEnd">
      <div class="title">{{t.title}}</div>
      <div class="meta"><span>{{t.priority}}</span><span>{{t.task_type}}</span></div>
     </div>
@@ -106,6 +111,9 @@ const TaskBoard={
  setup(){
   const list=ref([]);
   const filter=reactive({status:'',priority:'',keyword:''});
+  const auth=useAuth();
+  const dragTask=ref(null);
+  const dragOverCol=ref(null);
   const load=async()=>{const p={};if(filter.status)p.status=filter.status;if(filter.priority)p.priority=filter.priority;if(filter.keyword)p.keyword=filter.keyword;const r=await api.get('/tasks',{params:p});list.value=r.data;};
   const columns=computed(()=>[
    {label:'待认领',status:'open',list:list.value.filter(x=>x.status==='open')},
@@ -114,8 +122,54 @@ const TaskBoard={
    {label:'已完成',status:'done',list:list.value.filter(x=>x.status==='done')},
    {label:'已挂起',status:'blocked',list:list.value.filter(x=>x.status==='blocked')},
   ]);
+  const canDrag=(t)=>{
+   if(!auth.user.value)return false;
+   if(auth.isAdmin.value)return true;
+   if(t.assignee_id===auth.user.value.id){
+    if(['in_progress','open','blocked'].includes(t.status))return true;
+   }
+   return false;
+  };
+  const onDragStart=(event,task)=>{
+   dragTask.value=task;
+   event.dataTransfer.effectAllowed='move';
+   event.dataTransfer.setData('text/plain',task.id);
+  };
+  const onDragEnd=()=>{
+   dragTask.value=null;
+   dragOverCol.value=null;
+  };
+  const onDragOver=(event)=>{
+   event.preventDefault();
+   event.dataTransfer.dropEffect='move';
+   dragOverCol.value=event.currentTarget;
+  };
+  const onDragLeave=(event)=>{
+   if(dragOverCol.value===event.currentTarget){
+    dragOverCol.value=null;
+   }
+  };
+  const onDrop=async(event,newStatus)=>{
+   event.preventDefault();
+   dragOverCol.value=null;
+   if(!dragTask.value)return;
+   const task=dragTask.value;
+   if(task.status===newStatus)return;
+   if(!canDrag(task)){
+    ElMessage.warning('您没有权限更新此任务状态');
+    return;
+   }
+   try{
+    await api.patch('/tasks/'+task.id,{status:newStatus});
+    ElMessage.success('状态更新成功');
+    load();
+   }catch(e){
+    ElMessage.error('更新失败: '+(e.response?.data?.detail||e.message));
+   }
+   dragTask.value=null;
+  };
   onMounted(load);
-  return {list,filter,load,columns};
+  return {list,filter,load,columns,dragTask,canDrag,onDragStart,onDragEnd,onDragOver,onDragLeave,onDrop};
  }
 };
 
