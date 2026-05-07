@@ -34,9 +34,12 @@ body{font-family:'Helvetica Neue',Helvetica,'PingFang SC','Microsoft YaHei',Aria
 .board-card.dragging{opacity:0.5;transform:scale(1.02);box-shadow:0 8px 16px rgba(0,0,0,.15)}
 .board-card.draggable{cursor:grab}
 .board-card.draggable:active{cursor:grabbing}
-.board-col.drag-over{background:#e6f7ff;border:2px dashed #1890ff;transition:background .2s,border .2s}
+.board-col.dragover{background:#e6f7ff;border:2px dashed #1890ff;transition:background .2s,border .2s}
 .board-col h3{font-size:14px;margin-bottom:10px;color:#606266}
 .board-card .title{font-weight:600;margin-bottom:6px;font-size:14px}
+.board-card .title.parent::before{content:'📋 ';font-size:12px}
+.board-card .title.subtask::before{content:'  ↳ ';color:#909399;font-size:12px}
+.board-card.subtask-card{background:#f9f9f9;margin-left:16px;border-left:3px solid #409eff}
 .board-card .meta{font-size:12px;color:#909399;display:flex;justify-content:space-between}
 .board-card .subtask-hint{font-size:11px;color:#909399;margin-top:4px}
 .board-card .subtask-hint span{margin-right:8px}
@@ -50,12 +53,16 @@ body{font-family:'Helvetica Neue',Helvetica,'PingFang SC','Microsoft YaHei',Aria
 .modal-header h3{margin:0;font-size:18px}
 .modal-close{background:none;border:none;font-size:24px;cursor:pointer;color:#909399;padding:0;line-height:1}
 .modal-close:hover{color:#409eff}
+.delete-btn-wrapper{position:relative;display:inline-block;margin-left:12px}
+.confirm-popover{position:absolute;top:100%;right:0;margin-top:8px;background:#fff;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.15);padding:12px 16px;min-width:200px;z-index:100;border:1px solid #e4e7ed}
+.confirm-popover p{margin:0 0 12px 0;font-size:14px;color:#303133}
+.confirm-actions{display:flex;gap:8px;justify-content:flex-end}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <script>
-const {createApp,ref,reactive,computed,onMounted}=Vue;
+const {createApp,ref,reactive,computed,onMounted,onUnmounted}=Vue;
 const {createRouter,createWebHashHistory}=VueRouter;
 const {ElMessage,ElMessageBox}=ElementPlus;
 const API_BASE='http://localhost:8000/api';
@@ -67,10 +74,10 @@ api.interceptors.response.use(r=>r,err=>{if(err.response?.status===401){localSto
 const useAuth=()=>{
  const user=ref(null);
  const token=ref(localStorage.getItem('token')||'');
- const isAdmin=computed(()=>user.value?.role==='admin');
+ const isAdmin=computed(()=>user.value?.role?.toLowerCase()==='admin');
  const load=async()=>{if(!token.value)return;try{const r=await api.get('/auth/me');user.value=r.data;}catch{token.value='';localStorage.removeItem('token');}};
  const login=async(u,p)=>{const fd=new FormData();fd.append('username',u);fd.append('password',p);const r=await api.post('/auth/login',fd,{headers:{'Content-Type':'multipart/form-data'}});token.value=r.data.access_token;localStorage.setItem('token',token.value);await load();};
- const logout=()=>{token.value='';user.value=null;localStorage.removeItem('token');};
+ const logout=()=>{token.value='';user.value=null;localStorage.removeItem('token');location.hash='/login';};
  return {user,token,isAdmin,load,login,logout};
 };
 
@@ -109,11 +116,11 @@ const TaskBoard={
    <el-button type="success" @click="showCreateModal=true">+ 新建任务</el-button>
   </div>
   <div class="board">
-   <div class="board-col" v-for="col in columns" :key="col.status" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop($event,col.status)">
+   <div class="board-col" :class="{dragover:dragOverCol===col.status}" v-for="col in columns" :key="col.status" @dragover="onDragOver($event,col.status)" @dragleave="onDragLeave($event,col.status)" @drop="onDrop($event,col.status)">
     <h3>{{col.label}} ({{col.list.length}})</h3>
-    <div class="board-card" :class="{draggable:canDrag(t),dragging:dragTask?.id===t.id}" v-for="t in col.list" :key="t.id" :draggable="canDrag(t)" @click="$router.push('/tasks/'+t.id)" @dragstart="onDragStart($event,t)" @dragend="onDragEnd">
-     <div class="title">{{t.title}}</div>
-     <div class="meta"><span>{{t.priority}}</span><span>{{t.task_type}}</span></div>
+    <div class="board-card" :class="{draggable:canDrag(t),dragging:dragTask?.id===t.id,subtask:t.parent_id}" v-for="t in col.list" :key="t.id" :draggable="canDrag(t)" @click="$router.push('/tasks/'+t.id)" @dragstart="onDragStart($event,t)" @dragend="onDragEnd">
+     <div class="title" :class="{parent:!t.parent_id}">{{t.title}}</div>
+     <div class="meta"><span>{{t.priority}}</span><span>{{t.task_type}}</span><span v-if="t.parent_id" style="color:#909399;font-size:11px">[子任务]</span></div>
      <div class="subtask-hint" v-if="t.subtaskCount>0">
       <span>📎 {{t.subtaskCount}}个子任务</span>
       <span v-if="t.subtaskCount>0">
@@ -214,13 +221,13 @@ const TaskBoard={
    dragTask.value=null;
    dragOverCol.value=null;
   };
-  const onDragOver=(event)=>{
+  const onDragOver=(event,status)=>{
    event.preventDefault();
    event.dataTransfer.dropEffect='move';
-   dragOverCol.value=event.currentTarget;
+   dragOverCol.value=status;
   };
-  const onDragLeave=(event)=>{
-   if(dragOverCol.value===event.currentTarget){
+  const onDragLeave=(event,status)=>{
+   if(dragOverCol.value===status){
     dragOverCol.value=null;
    }
   };
@@ -331,16 +338,18 @@ const TaskNew={
 
 const TaskDetail={
  template:`<div class="container">
-  <div class="page-title">任务详情 #{{task.id}} <el-button size="small" @click="openEdit" style="margin-left:12px">编辑任务</el-button> <el-button size="small" type="danger" @click="deleteTask" style="margin-left:12px">删除任务</el-button></div>
+  <div class="page-title">
+   <span v-if="task.parent_id" style="font-size:14px;color:#909399;font-weight:normal">子任务</span>
+   <span v-else style="font-size:14px;color:#409eff;font-weight:normal">📋 父任务</span>
+   #{{task.id}} {{task.title}} <el-button size="small" @click="openEdit" style="margin-left:12px">编辑任务</el-button> <div class="delete-btn-wrapper"><el-button size="small" type="danger" @click="deleteBtnClick">删除任务</el-button><div v-if="showDeleteConfirm" class="confirm-popover" @click.stop><p>确定要删除此任务吗？</p><div class="confirm-actions"><el-button size="mini" @click="confirmDelete">确定</el-button><el-button size="mini" @click="showDeleteConfirm = false">取消</el-button></div></div></div>
+  </div>
   <div class="card">
-   <h3 style="margin-bottom:12px">{{task.title}}</h3>
    <p style="color:#606266;margin-bottom:12px;white-space:pre-wrap">{{task.description||'暂无描述'}}</p>
    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
     <el-tag>{{task.priority}}</el-tag>
     <el-tag type="info">{{task.task_type}}</el-tag>
     <el-tag :type="statusType">{{statusLabel}}</el-tag>
     <span v-if="task.assignee">负责人: {{task.assignee.display_name}}</span>
-    <span v-if="task.parent_id" style="color:#909399">子任务</span>
    </div>
    <div style="margin-bottom:12px">
     <el-button v-if="canClaim" type="primary" @click="claim">认领任务</el-button>
@@ -362,11 +371,12 @@ const TaskDetail={
     <el-progress :percentage="subtaskProgress" :stroke-width="8"/>
    </div>
    <div v-if="task.subtasks&&task.subtasks.length" style="display:flex;flex-direction:column;gap:8px">
-    <div v-for="st in task.subtasks" :key="st.id" style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:#fafafa;border-radius:4px;cursor:pointer" @click="$router.push('/tasks/'+st.id)">
-     <span :style="{color:st.status==='done'?'#67c23a':'#909399',fontSize:'16px'}">{{st.status==='done'?'✓':'○'}}</span>
+    <div v-for="st in task.subtasks" :key="st.id" style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:#fafafa;border-radius:4px;cursor:pointer;border-left:3px solid #409eff" @click="$router.push('/tasks/'+st.id)">
+     <span :style="{color:st.status==='done'?'#67c23a':'#409eff',fontSize:'16px'}">{{st.status==='done'?'✓':'○'}}</span>
      <span style="flex:1">{{st.title}}</span>
-     <el-tag size="small">{{st.priority}}</el-tag>
-     <span style="color:#909399;font-size:12px">{{statusMap[st.status]||st.status}}</span>
+     <el-tag size="small" type="info">{{st.priority}}</el-tag>
+     <span style="color:#67c23a;font-size:12px" v-if="st.status==='done'">已完成</span>
+     <span style="color:#909399;font-size:12px" v-else>{{statusMap[st.status]||st.status}}</span>
     </div>
    </div>
    <el-empty v-else description="暂无子任务，点击上方按钮添加子任务"/>
@@ -422,6 +432,7 @@ const TaskDetail={
   const task=ref({});const logs=ref([]);const auth=useAuth();
   const showEditModal=ref(false);
   const showAddSubtask=ref(false);
+  const showDeleteConfirm=ref(false);
   const newSubtaskTitle=ref('');
   const editForm=reactive({title:'',description:'',task_type:'feature',priority:'P2',status:'open',estimated_hours:null,tags:'',deadline:null});
   const load=async()=>{const id=router.currentRoute.value.params.id;const r=await api.get('/tasks/'+id);task.value=r.data;const lr=await api.get('/tasks/'+id+'/logs');logs.value=lr.data;};
@@ -460,12 +471,15 @@ const TaskDetail={
    if(!newSubtaskTitle.value.trim()){ElMessage.warning('请输入子任务标题');return;}
    try{await api.post('/tasks',{title:newSubtaskTitle.value,parent_id:task.value.id,status:'open'});ElMessage.success('子任务添加成功');newSubtaskTitle.value='';showAddSubtask.value=false;load();}catch(e){ElMessage.error('添加失败: '+(e.response?.data?.detail||e.message));}
   };
-  const deleteTask=async()=>{
-   if(!confirm('确定要删除此任务吗？子任务将保留但不再关联此父任务。'))return;
+  const confirmDelete=async()=>{
+   showDeleteConfirm.value=false;
    try{await api.delete('/tasks/'+task.value.id);ElMessage.success('删除成功');location.hash='/';}catch(e){ElMessage.error('删除失败: '+(e.response?.data?.detail||e.message));}
   };
-  onMounted(load);
-  return {task,logs,statusLabel,statusType,statusMap,subtaskDone,subtaskProgress,canClaim,canStart,canReview,canDone,canBlock,canAbandon,canEdit,claim,updateStatus,showEditModal,editForm,openEdit,closeEdit,saveEdit,showAddSubtask,newSubtaskTitle,addSubtask,deleteTask};
+  const handleClickOutside=()=>{showDeleteConfirm.value=false;};
+  const deleteBtnClick=(e)=>{e.stopPropagation();showDeleteConfirm.value=true;};
+  onMounted(()=>{load();document.addEventListener('click',handleClickOutside);});
+  onUnmounted(()=>{document.removeEventListener('click',handleClickOutside);});
+  return {task,logs,statusLabel,statusType,statusMap,subtaskDone,subtaskProgress,canClaim,canStart,canReview,canDone,canBlock,canAbandon,canEdit,claim,updateStatus,showEditModal,editForm,openEdit,closeEdit,saveEdit,showAddSubtask,newSubtaskTitle,addSubtask,showDeleteConfirm,confirmDelete,deleteBtnClick};
  }
 };
 
@@ -476,26 +490,42 @@ const MyTasks={
    <el-tabs v-model="tab">
     <el-tab-pane label="我创建的" name="created">
      <el-table :data="created">
-      <el-table-column prop="title" label="标题"/>
+      <el-table-column prop="title" label="标题">
+       <template #default="s">{{s.row.parent_id?'↳ ':''}}{{s.row.title}}</template>
+      </el-table-column>
       <el-table-column prop="status" label="状态" width="100">
        <template #default="s">{{statusMap[s.row.status]||s.row.status}}</template>
       </el-table-column>
       <el-table-column prop="priority" label="优先级" width="80"/>
-      <el-table-column label="操作" width="150">
+      <el-table-column label="类型" width="80">
+       <template #default="s">
+        <el-tag size="small" v-if="s.row.parent_id" type="warning">子任务</el-tag>
+        <el-tag size="small" v-else type="primary">父任务</el-tag>
+       </template>
+      </el-table-column>
+      <el-table-column label="操作" width="200">
        <template #default="s">
         <el-button size="small" @click="openEdit(s.row)">编辑</el-button>
-        <el-button size="small" type="danger" @click="deleteTask(s.row)">删除</el-button>
+        <div class="delete-btn-wrapper"><el-button size="small" type="danger" @click="(e) => deleteBtnClick(e, s.row)">删除</el-button><div v-if="deleteConfirmTask?.id === s.row.id" class="confirm-popover" @click.stop><p>确定要删除任务「{{s.row.title}}」吗？</p><div class="confirm-actions"><el-button size="mini" @click="confirmDelete(s.row)">确定</el-button><el-button size="mini" @click="deleteConfirmTask = null">取消</el-button></div></div></div>
        </template>
       </el-table-column>
      </el-table>
     </el-tab-pane>
     <el-tab-pane label="我认领的" name="claimed">
      <el-table :data="claimed">
-      <el-table-column prop="title" label="标题"/>
+      <el-table-column prop="title" label="标题">
+       <template #default="s">{{s.row.parent_id?'↳ ':''}}{{s.row.title}}</template>
+      </el-table-column>
       <el-table-column prop="status" label="状态" width="100">
        <template #default="s">{{statusMap[s.row.status]||s.row.status}}</template>
       </el-table-column>
       <el-table-column prop="priority" label="优先级" width="80"/>
+      <el-table-column label="类型" width="80">
+       <template #default="s">
+        <el-tag size="small" v-if="s.row.parent_id" type="warning">子任务</el-tag>
+        <el-tag size="small" v-else type="primary">父任务</el-tag>
+       </template>
+      </el-table-column>
      </el-table>
     </el-tab-pane>
    </el-tabs>
@@ -541,6 +571,7 @@ const MyTasks={
  </div>`,
  setup(){
   const tab=ref('claimed');const created=ref([]);const claimed=ref([]);
+  const deleteConfirmTask=ref(null);
   const showCreateModal=ref(false);const showEditModal=ref(false);
   const editId=ref(null);
   const statusMap={draft:'草稿',open:'待认领',in_progress:'进行中',pending_review:'待验收',done:'已完成',blocked:'已挂起',abandoned:'已放弃'};
@@ -562,12 +593,15 @@ const MyTasks={
     closeModal();load();
    }catch(e){ElMessage.error((showEditModal.value?'保存':'创建')+'失败: '+(e.response?.data?.detail||e.message));}
   };
-  const deleteTask=async(task)=>{
-   if(!confirm('确定要删除任务「'+task.title+'」吗？'))return;
+  const deleteBtnClick=(e,task)=>{e.stopPropagation();deleteConfirmTask.value=task;};
+  const confirmDelete=async(task)=>{
+   deleteConfirmTask.value=null;
    try{await api.delete('/tasks/'+task.id);ElMessage.success('删除成功');load();}catch(e){ElMessage.error('删除失败: '+(e.response?.data?.detail||e.message));}
   };
-  onMounted(load);
-  return {tab,created,claimed,statusMap,showCreateModal,showEditModal,form,openEdit,closeModal,submitForm,deleteTask};
+  const handleClickOutside=()=>{deleteConfirmTask.value=null;};
+  onMounted(()=>{load();document.addEventListener('click',handleClickOutside);});
+  onUnmounted(()=>{document.removeEventListener('click',handleClickOutside);});
+  return {tab,created,claimed,statusMap,showCreateModal,showEditModal,form,openEdit,closeModal,submitForm,deleteConfirmTask,deleteBtnClick,confirmDelete};
  }
 };
 

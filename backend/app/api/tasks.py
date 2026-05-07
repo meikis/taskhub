@@ -74,6 +74,7 @@ def patch_task(task_id: int, data: TaskUpdate, db: Session = Depends(get_session
 
 @router.delete("/{task_id}")
 def delete_task(task_id: int, db: Session = Depends(get_session), current_user: UserRead = Depends(get_current_user)):
+    from app.models import Task
     task = get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -110,12 +111,53 @@ def get_logs(task_id: int, db: Session = Depends(get_session)):
 
 def enrich_task(db: Session, task):
     from sqlmodel import select
-    tr = TaskRead.model_validate(task)
-    tr.creator = UserRead.model_validate(get_user_by_id(db, task.creator_id)) if get_user_by_id(db, task.creator_id) else None
-    tr.assignee = UserRead.model_validate(get_user_by_id(db, task.assignee_id)) if task.assignee_id and get_user_by_id(db, task.assignee_id) else None
-    if task.id is not None:
-        subtasks = db.exec(select(Task).where(Task.parent_id == task.id)).all()
-        tr.subtasks = [enrich_task(db, st) for st in subtasks] if subtasks else []
-    else:
-        tr.subtasks = []
-    return tr
+    from app.models import Task
+    creator = get_user_by_id(db, task.creator_id)
+    assignee = get_user_by_id(db, task.assignee_id) if task.assignee_id else None
+    subtasks = db.exec(select(Task).where(Task.parent_id == task.id)).all()
+    subtask_list = []
+    for st in subtasks:
+        st_creator = get_user_by_id(db, st.creator_id)
+        st_assignee = get_user_by_id(db, st.assignee_id) if st.assignee_id else None
+        subtask_list.append(TaskRead(
+            id=st.id,
+            title=st.title,
+            description=st.description,
+            task_type=st.task_type,
+            priority=st.priority,
+            status=st.status,
+            department=st.department,
+            estimated_hours=st.estimated_hours,
+            tags=st.tags,
+            deadline=st.deadline,
+            creator_id=st.creator_id,
+            assignee_id=st.assignee_id,
+            parent_id=st.parent_id,
+            created_at=st.created_at,
+            claimed_at=st.claimed_at,
+            completed_at=st.completed_at,
+            creator=UserRead.model_validate(st_creator) if st_creator else None,
+            assignee=UserRead.model_validate(st_assignee) if st_assignee else None,
+            subtasks=[],
+        ))
+    return TaskRead(
+        id=task.id,
+        title=task.title,
+        description=task.description,
+        task_type=task.task_type,
+        priority=task.priority,
+        status=task.status,
+        department=task.department,
+        estimated_hours=task.estimated_hours,
+        tags=task.tags,
+        deadline=task.deadline,
+        creator_id=task.creator_id,
+        assignee_id=task.assignee_id,
+        parent_id=task.parent_id,
+        created_at=task.created_at,
+        claimed_at=task.claimed_at,
+        completed_at=task.completed_at,
+        creator=UserRead.model_validate(creator) if creator else None,
+        assignee=UserRead.model_validate(assignee) if assignee else None,
+        subtasks=subtask_list,
+    )
