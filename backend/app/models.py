@@ -100,6 +100,7 @@ class TaskCreate(SQLModel):
     description: Optional[str] = None
     task_type: TaskType = TaskType.OTHER
     priority: Priority = Priority.P2
+    status: Optional[TaskStatus] = None
     department: Optional[str] = None
     estimated_hours: Optional[int] = None
     tags: Optional[str] = None
