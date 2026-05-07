@@ -31,6 +31,19 @@ class UserRole(str, Enum):
     USER = "user"
     OBSERVER = "observer"
 
+class FeedbackCategory(str, Enum):
+    FEATURE = "feature"
+    IMPROVEMENT = "improvement"
+    BUG = "bug"
+    EXPERIENCE = "experience"
+    OTHER = "other"
+
+class FeedbackStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    IMPLEMENTED = "implemented"
+
 # ========== 用户 ==========
 class UserBase(SQLModel):
     username: str = Field(index=True, unique=True)
@@ -132,3 +145,39 @@ class TaskLogRead(SQLModel):
     comment: Optional[str]
     created_at: datetime
     user: Optional[UserRead] = None
+
+# ========== 反馈建议 ==========
+class FeedbackBase(SQLModel):
+    title: str
+    description: Optional[str] = Field(default=None)
+    category: FeedbackCategory = Field(default=FeedbackCategory.OTHER)
+    priority: Optional[Priority] = Field(default=None)
+    status: FeedbackStatus = Field(default=FeedbackStatus.PENDING)
+
+class Feedback(FeedbackBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    submitter_id: int = Field(foreign_key="user.id")
+    reviewer_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    review_comment: Optional[str] = Field(default=None)
+    review_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class FeedbackCreate(SQLModel):
+    title: str
+    description: Optional[str] = None
+    category: FeedbackCategory = FeedbackCategory.OTHER
+
+class FeedbackReview(SQLModel):
+    status: FeedbackStatus
+    priority: Optional[Priority] = None
+    review_comment: Optional[str] = None
+
+class FeedbackRead(FeedbackBase):
+    id: int
+    submitter_id: int
+    reviewer_id: Optional[int]
+    review_comment: Optional[str]
+    review_at: Optional[datetime]
+    created_at: datetime
+    submitter: Optional[UserRead] = None
+    reviewer: Optional[UserRead] = None

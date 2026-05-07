@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TaskHub - 研发任务追踪系统</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus@2.5.0/dist/index.css">
+<script src="https://unpkg.com/vue@3.4.15/dist/vue.global.js"></script>
+<script src="https://unpkg.com/vue-router@4.2.5/dist/vue-router.global.js"></script>
+<script src="https://unpkg.com/axios@1.6.5/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/element-plus@2.5.0/dist/index.full.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Helvetica Neue',Helvetica,'PingFang SC','Microsoft YaHei',Arial,sans-serif;background:#f5f7fa;color:#303133}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+.el-header{background:#fff;border-bottom:1px solid #e4e7ed;display:flex;align-items:center;justify-content:space-between;padding:0 20px}
+.el-menu{height:60px;border-bottom:none}
+.page-title{font-size:20px;font-weight:600;margin-bottom:16px}
+.card{ background:#fff; border-radius:8px; padding:20px; box-shadow:0 1px 4px rgba(0,0,0,.06); margin-bottom:20px; }
+.status-tag-open{ background:#e6f7ff; color:#1890ff; border:1px solid #91d5ff; }
+.status-tag-inprogress{ background:#fff7e6; color:#fa8c16; border:1px solid #ffd591; }
+.status-tag-done{ background:#f6ffed; color:#52c41a; border:1px solid #b7eb8f; }
+.status-tag-blocked{ background:#fff1f0; color:#f5222d; border:1px solid #ffa39e; }
+.status-tag-pending{ background:#f5f5f5; color:#595959; border:1px solid #d9d9d9; }
+.status-tag-approved{ background:#f6ffed; color:#52c41a; border:1px solid #b7eb8f; }
+.status-tag-rejected{ background:#fff1f0; color:#f5222d; border:1px solid #ffa39e; }
+.status-tag-implemented{ background:#e6f7ff; color:#1890ff; border:1px solid #91d5ff; }
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.board-col{background:#f0f2f5;border-radius:8px;padding:12px}
+.board-col h3{font-size:14px;margin-bottom:10px;color:#606266}
+.board-card{background:#fff;border-radius:6px;padding:12px;margin-bottom:10px;cursor:pointer;transition:box-shadow .2s}
+.board-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.1)}
+.board-card .title{font-weight:600;margin-bottom:6px;font-size:14px}
+.board-card .meta{font-size:12px;color:#909399;display:flex;justify-content:space-between}
+.login-wrap{height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#667eea,#764ba2)}
+.login-box{width:400px;background:#fff;padding:40px;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const {createApp,ref,reactive,computed,onMounted}=Vue;
+const {createRouter,createWebHashRoute}=VueRouter;
+const {ElMessage,ElMessageBox}=ElementPlus;
+const API_BASE='http://localhost:8000/api';
+
+const api=axios.create({baseURL:API_BASE});
+api.interceptors.request.use(cfg=>{const t=localStorage.getItem('token');if(t)cfg.headers.Authorization='Bearer '+t;return cfg;});
+api.interceptors.response.use(r=>r,err=>{if(err.response?.status===401){localStorage.removeItem('token');location.hash='/login';}return Promise.reject(err);});
+
+const useAuth=()=>{
+ const user=ref(null);
+ const token=ref(localStorage.getItem('token')||'');
+ const isAdmin=computed(()=>user.value?.role==='admin');
+ const load=async()=>{if(!token.value)return;try{const r=await api.get('/auth/me');user.value=r.data;}catch{token.value='';localStorage.removeItem('token');}};
+ const login=async(u,p)=>{const r=await api.post('/auth/login',{username:u,password:p});token.value=r.data.access_token;localStorage.setItem('token',token.value);await load();};
+ const logout=()=>{token.value='';user.value=null;localStorage.removeItem('token');};
+ return {user,token,isAdmin,load,login,logout};
+};
+
+const Login={
+ template:`<div class="login-wrap">
+  <div class="login-box">
+   <h2 style="text-align:center;margin-bottom:24px">TaskHub 登录</h2>
+   <el-form label-position="top" @submit.prevent="onLogin">
+    <el-form-item label="用户名"><el-input v-model="form.username" size="large"/></el-form-item>
+    <el-form-item label="密码"><el-input v-model="form.password" type="password" size="large" show-password/></el-form-item>
+    <el-button type="primary" size="large" style="width:100%" @click="onLogin">登录</el-button>
+   </el-form>
+  </div>
+ </div>`,
+ setup(){
+  const auth=useAuth();
+  const form=reactive({username:'',password:''});
+  const onLogin=async()=>{try{await auth.login(form.username,form.password);ElMessage.success('登录成功');location.hash='/';}catch(e){ElMessage.error('登录失败: '+ (e.response?.data?.detail||e.message));}};
+  return {form,onLogin};
+ }
+};
+
+const TaskBoard={
+ template:`<div class="container">
+  <div class="page-title">任务看板</div>
+  <div class="card" style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+   <el-input v-model="filter.keyword" placeholder="搜索任务标题" clearable style="width:200px"/>
+   <el-select v-model="filter.status" placeholder="状态" clearable style="width:140px">
+    <el-option label="草稿" value="draft"/><el-option label="待认领" value="open"/><el-option label="进行中" value="in_progress"/>
+    <el-option label="待验收" value="pending_review"/><el-option label="已完成" value="done"/><el-option label="已挂起" value="blocked"/>
+   </el-select>
+   <el-select v-model="filter.priority" placeholder="优先级" clearable style="width:120px">
+    <el-option label="P0" value="P0"/><el-option label="P1" value="P1"/><el-option label="P2" value="P2"/><el-option label="P3" value="P3"/>
+   </el-select>
+   <el-button type="primary" @click="load">查询</el-button>
+   <el-button type="success" @click="$router.push('/tasks/new')">+ 新建任务</el-button>
+  </div>
+  <div class="board">
+   <div class="board-col" v-for="col in columns" :key="col.status">
+    <h3>{{col.label}} ({{col.list.length}})</h3>
+    <div class="board-card" v-for="t in col.list" :key="t.id" @click="$router.push('/tasks/'+t.id)">
+     <div class="title">{{t.title}}</div>
+     <div class="meta"><span>{{t.priority}}</span><span>{{t.task_type}}</span></div>
+    </div>
+   </div>
+  </div>
+ </div>`,
+ setup(){
+  const list=ref([]);
+  const filter=reactive({status:'',priority:'',keyword:''});
+  const load=async()=>{const p={};if(filter.status)p.status=filter.status;if(filter.priority)p.priority=filter.priority;if(filter.keyword)p.keyword=filter.keyword;const r=await api.get('/tasks',{params:p});list.value=r.data;};
+  const columns=computed(()=>[
+   {label:'待认领',status:'open',list:list.value.filter(x=>x.status==='open')},
+   {label:'进行中',status:'in_progress',list:list.value.filter(x=>x.status==='in_progress')},
+   {label:'待验收',status:'pending_review',list:list.value.filter(x=>x.status==='pending_review')},
+   {label:'已完成',status:'done',list:list.value.filter(x=>x.status==='done')},
+   {label:'已挂起',status:'blocked',list:list.value.filter(x=>x.status==='blocked')},
+  ]);
+  onMounted(load);
+  return {list,filter,load,columns};
+ }
+};
+
+const TaskNew={
+ template:`<div class="container">
+  <div class="page-title">新建任务</div>
+  <div class="card" style="max-width:700px">
+   <el-form label-width="100px">
+    <el-form-item label="标题"><el-input v-model="form.title"/></el-form-item>
+    <el-form-item label="描述"><el-input v-model="form.description" type="textarea" rows="4"/></el-form-item>
+    <el-form-item label="类型">
+     <el-select v-model="form.task_type"><el-option label="Bug修复" value="bug"/><el-option label="新功能" value="feature"/><el-option label="技术债" value="tech_debt"/><el-option label="调研" value="research"/><el-option label="其他" value="other"/></el-select>
+    </el-form-item>
+    <el-form-item label="优先级">
+     <el-select v-model="form.priority"><el-option label="P0" value="P0"/><el-option label="P1" value="P1"/><el-option label="P2" value="P2"/><el-option label="P3" value="P3"/></el-select>
+    </el-form-item>
+    <el-form-item label="预估工时"><el-input-number v-model="form.estimated_hours" :min="0"/></el-form-item>
+    <el-form-item label="标签"><el-input v-model="form.tags" placeholder="逗号分隔，如前端,Vue"/></el-form-item>
+    <el-form-item label="期望完成"><el-date-picker v-model="form.deadline" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss"/></el-form-item>
+    <el-form-item>
+     <el-button type="primary" @click="submit">立即发布</el-button>
+     <el-button @click="$router.back()">取消</el-button>
+    </el-form-item>
+   </el-form>
+  </div>
+ </div>`,
+ setup(){
+  const form=reactive({title:'',description:'',task_type:'feature',priority:'P2',estimated_hours:null,tags:'',deadline:null});
+  const submit=async()=>{if(!form.title){ElMessage.warning('请填写标题');return;}await api.post('/tasks',form);ElMessage.success('创建成功');location.hash='/';};
+  return {form,submit};
+ }
+};
+
+const TaskDetail={
+ template:`<div class="container">
+  <div class="page-title">任务详情 #{{task.id}}</div>
+  <div class="card">
+   <h3 style="margin-bottom:12px">{{task.title}}</h3>
+   <p style="color:#606266;margin-bottom:12px;white-space:pre-wrap">{{task.description||'暂无描述'}}</p>
+   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+    <el-tag>{{task.priority}}</el-tag>
+    <el-tag type="info">{{task.task_type}}</el-tag>
+    <el-tag :type="statusType">{{statusLabel}}</el-tag>
+    <span v-if="task.assignee">负责人: {{task.assignee.display_name}}</span>
+   </div>
+   <div style="margin-bottom:12px">
+    <el-button v-if="canClaim" type="primary" @click="claim">认领任务</el-button>
+    <el-button v-if="canStart" type="primary" @click="updateStatus('in_progress')">开始处理</el-button>
+    <el-button v-if="canReview" type="success" @click="updateStatus('pending_review')">提交验收</el-button>
+    <el-button v-if="canDone" type="success" @click="updateStatus('done')">验收通过</el-button>
+    <el-button v-if="canBlock" type="danger" @click="updateStatus('blocked')">挂起</el-button>
+    <el-button v-if="canAbandon" @click="updateStatus('abandoned')">放弃</el-button>
+   </div>
+  </div>
+  <div class="card">
+   <h4 style="margin-bottom:10px">操作记录</h4>
+   <el-timeline>
+    <el-timeline-item v-for="log in logs" :key="log.id" :timestamp="log.created_at">
+     {{log.user?.display_name||'系统'}} {{log.action}} <span v-if="log.comment">- {{log.comment}}</span>
+    </el-timeline-item>
+   </el-timeline>
+  </div>
+ </div>`,
+ setup(){
+  const task=ref({});const logs=ref([]);const auth=useAuth();
+  const load=async()=>{const id=router.currentRoute.value.params.id;const r=await api.get('/tasks/'+id);task.value=r.data;const lr=await api.get('/tasks/'+id+'/logs');logs.value=lr.data;};
+  const statusMap={draft:'草稿',open:'待认领',in_progress:'进行中',pending_review:'待验收',done:'已完成',blocked:'已挂起',abandoned:'已放弃',rejected:'已驳回'};
+  const statusLabel=computed(()=>statusMap[task.value.status]||task.value.status);
+  const statusType=computed(()=>{const s=task.value.status;if(s==='done')return 'success';if(s==='in_progress')return 'warning';if(s==='blocked'||s==='abandoned'||s==='rejected')return 'danger';return '';});
+  const isMine=computed(()=>task.value.assignee_id===auth.user.value?.id);
+  const canClaim=computed(()=>task.value.status==='open');
+  const canStart=computed(()=>task.value.status==='open'&&isMine.value);
+  const canReview=computed(()=>task.value.status==='in_progress'&&isMine.value);
+  const canDone=computed(()=>task.value.status==='pending_review'&&(task.value.creator_id===auth.user.value?.id||auth.isAdmin.value));
+  const canBlock=computed(()=>['in_progress','open'].includes(task.value.status)&&isMine.value);
+  const canAbandon=computed(()=>['in_progress','open'].includes(task.value.status)&&isMine.value);
+  const claim=async()=>{await api.post('/tasks/'+task.value.id+'/claim');ElMessage.success('认领成功');load();};
+  const updateStatus=async(s)=>{await api.patch('/tasks/'+task.value.id,{status:s});ElMessage.success('状态更新成功');load();};
+  onMounted(load);
+  return {task,logs,statusLabel,statusType,canClaim,canStart,canReview,canDone,canBlock,canAbandon,claim,updateStatus};
+ }
+};
+
+const MyTasks={
+ template:`<div class="container">
+  <div class="page-title">我的任务</div>
+  <div class="card">
+   <el-tabs v-model="tab">
+    <el-tab-pane label="我创建的" name="created"><el-table :data="created"><el-table-column prop="title" label="标题"/><el-table-column prop="status" label="状态"/><el-table-column prop="priority" label="优先级"/></el-table></el-tab-pane>
+    <el-tab-pane label="我认领的" name="claimed"><el-table :data="claimed"><el-table-column prop="title" label="标题"/><el-table-column prop="status" label="状态"/><el-table-column prop="priority" label="优先级"/></el-table></el-tab-pane>
+   </el-tabs>
+  </div>
+ </div>`,
+ setup(){
+  const tab=ref('claimed');const created=ref([]);const claimed=ref([]);
+  const load=async()=>{const c=await api.get('/tasks',{params:{creator_id:1}});created.value=c.data;const cl=await api.get('/tasks',{params:{assignee_id:1}});claimed.value=cl.data;};
+  onMounted(load);
+  return {tab,created,claimed};
+ }
+};
+
+const FeedbackSubmit={
+ template:`<div class="container">
+  <div class="page-title">提交反馈建议</div>
+  <div class="card" style="max-width:700px">
+   <el-form label-width="100px">
+    <el-form-item label="标题"><el-input v-model="form.title" placeholder="一句话描述你的建议"/></el-form-item>
+    <el-form-item label="类别">
+     <el-select v-model="form.category">
+      <el-option label="功能改进" value="improvement"/><el-option label="Bug反馈" value="bug"/>
+      <el-option label="体验优化" value="experience"/><el-option label="新功能" value="feature"/><el-option label="其他" value="other"/>
+     </el-select>
+    </el-form-item>
+    <el-form-item label="详细描述"><el-input v-model="form.description" type="textarea" rows="6" placeholder="请详细描述问题或建议，附上场景和操作步骤更佳"/></el-form-item>
+    <el-form-item><el-button type="primary" @click="submit">提交</el-button><el-button @click="$router.back()">取消</el-button></el-form-item>
+   </el-form>
+  </div>
+ </div>`,
+ setup(){
+  const form=reactive({title:'',category:'improvement',description:''});
+  const submit=async()=>{if(!form.title){ElMessage.warning('请填写标题');return;}await api.post('/feedbacks',form);ElMessage.success('提交成功，等待审核');form.title='';form.description='';form.category='improvement';};
+  return {form,submit};
+ }
+};
+
+const FeedbackBoard={
+ template:`<div class="container">
+  <div class="page-title">反馈建议看板</div>
+  <div class="card" style="display:flex;gap:12px;margin-bottom:16px">
+   <el-select v-model="filter.status" clearable placeholder="状态" style="width:140px">
+    <el-option label="待审核" value="pending"/><el-option label="已通过" value="approved"/><el-option label="已驳回" value="rejected"/><el-option label="已实现" value="implemented"/>
+   </el-select>
+   <el-select v-model="filter.category" clearable placeholder="类别" style="width:140px">
+    <el-option label="功能改进" value="improvement"/><el-option label="Bug反馈" value="bug"/><el-option label="体验优化" value="experience"/><el-option label="新功能" value="feature"/><el-option label="其他" value="other"/>
+   </el-select>
+   <el-button type="primary" @click="load">查询</el-button>
+   <el-button type="success" @click="$router.push('/feedbacks/new')">+ 提交反馈</el-button>
+   <el-button v-if="auth.isAdmin.value" type="warning" @click="$router.push('/feedbacks/review')">审核面板</el-button>
+  </div>
+  <div class="card">
+   <el-table :data="list" style="width:100%">
+    <el-table-column prop="id" label="ID" width="60"/>
+    <el-table-column prop="title" label="标题"/>
+    <el-table-column prop="category" label="类别" width="100"><template #default="s">{{catMap[s.row.category]||s.row.category}}</template></el-table-column>
+    <el-table-column prop="status" label="状态" width="100"><template #default="s"><el-tag size="small" :class="'status-tag-'+s.row.status">{{statusMap[s.row.status]}}</el-tag></template></el-table-column>
+    <el-table-column prop="submitter.display_name" label="提交人" width="120"/>
+    <el-table-column prop="created_at" label="提交时间" width="160"/>
+   </el-table>
+  </div>
+ </div>`,
+ setup(){
+  const auth=useAuth();const list=ref([]);const filter=reactive({status:'',category:''});
+  const statusMap={pending:'待审核',approved:'已通过',rejected:'已驳回',implemented:'已实现'};
+  const catMap={improvement:'功能改进',bug:'Bug反馈',experience:'体验优化',feature:'新功能',other:'其他'};
+  const load=async()=>{const p={};if(filter.status)p.status=filter.status;if(filter.category)p.category=filter.category;const r=await api.get('/feedbacks',{params:p});list.value=r.data;};
+  onMounted(load);
+  return {list,filter,statusMap,catMap,load,auth};
+ }
+};
+
+const FeedbackReview={
+ template:`<div class="container">
+  <div class="page-title">反馈审核</div>
+  <div class="card">
+   <el-alert title="仅管理员可审核" type="info" show-icon style="margin-bottom:16px"/>
+   <el-table :data="pendingList" style="width:100%">
+    <el-table-column prop="id" label="ID" width="60"/>
+    <el-table-column prop="title" label="标题"/>
+    <el-table-column prop="category" label="类别" width="100"><template #default="s">{{catMap[s.row.category]||s.row.category}}</template></el-table-column>
+    <el-table-column prop="submitter.display_name" label="提交人" width="120"/>
+    <el-table-column prop="created_at" label="提交时间" width="160"/>
+    <el-table-column label="操作" width="200">
+     <template #default="s">
+      <el-button size="small" type="primary" @click="openReview(s.row)">审核</el-button>
+     </template>
+    </el-table-column>
+   </el-table>
+  </div>
+  <div class="card" style="margin-top:20px"><h4 style="margin-bottom:12px">已处理反馈</h4>
+   <el-table :data="doneList" style="width:100%">
+    <el-table-column prop="id" label="ID" width="60"/>
+    <el-table-column prop="title" label="标题"/>
+    <el-table-column prop="status" label="状态" width="100"><template #default="s"><el-tag size="small" :class="'status-tag-'+s.row.status">{{statusMap[s.row.status]}}</tag></template></el-table-column>
+    <el-table-column prop="reviewer.display_name" label="审核人" width="120"/>
+    <el-table-column prop="review_comment" label="审核意见"/>
+   </el-table>
+  </div>
+  <el-dialog v-model="dialogVisible" title="审核反馈" width="500px">
+   <p style="margin-bottom:12px"><strong>{{current.title}}</strong></p>
+   <p style="color:#606266;margin-bottom:16px">{{current.description}}</p>
+   <el-form label-width="80px">
+    <el-form-item label="审核结果">
+     <el-radio-group v-model="reviewForm.status">
+      <el-radio label="approved">通过</el-radio>
+      <el-radio label="rejected">驳回</el-radio>
+      <el-radio label="implemented">已实现</el-radio>
+     </el-radio-group>
+    </el-form-item>
+    <el-form-item label="优先级">
+     <el-select v-model="reviewForm.priority" clearable placeholder="可选">
+      <el-option label="P0" value="P0"/><el-option label="P1" value="P1"/><el-option label="P2" value="P2"/><el-option label="P3" value="P3"/>
+     </el-select>
+    </el-form-item>
+    <el-form-item label="审核意见"><el-input v-model="reviewForm.review_comment" type="textarea" rows="3"/></el-form-item>
+   </el-form>
+   <template #footer>
+    <el-button @click="dialogVisible=false">取消</el-button>
+    <el-button type="primary" @click="submitReview">确定</el-button>
+   </template>
+  </el-dialog>
+ </div>`,
+ setup(){
+  const pendingList=ref([]);const doneList=ref([]);const dialogVisible=ref(false);
+  const current=ref({});const reviewForm=reactive({status:'approved',priority:null,review_comment:''});
+  const statusMap={pending:'待审核',approved:'已通过',rejected:'已驳回',implemented:'已实现'};
+  const catMap={improvement:'功能改进',bug:'Bug反馈',experience:'体验优化',feature:'新功能',other:'其他'};
+  const load=async()=>{const all=await api.get('/feedbacks');pendingList.value=all.data.filter(x=>x.status==='pending');doneList.value=all.data.filter(x=>x.status!=='pending');};
+  const openReview=(row)=>{current.value=row;reviewForm.status='approved';reviewForm.priority=null;reviewForm.review_comment='';dialogVisible.value=true;};
+  const submitReview=async()=>{await api.put('/feedbacks/'+current.value.id+'/review',reviewForm);ElMessage.success('审核完成');dialogVisible.value=false;load();};
+  onMounted(load);
+  return {pendingList,doneList,dialogVisible,current,reviewForm,statusMap,catMap,openReview,submitReview};
+ }
+};
+
+const Dashboard={
+ template:`<div class="container">
+  <div class="page-title">统计面板</div>
+  <div class="card">
+   <h4 style="margin-bottom:12px">反馈统计</h4>
+   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px">
+    <div class="card" style="text-align:center"><div style="font-size:28px;color:#409eff">{{fbStats.total||0}}</div><div>总计</div></div>
+    <div class="card" style="text-align:center"><div style="font-size:28px;color:#e6a23c">{{fbStats.pending||0}}</div><div>待审核</div></div>
+    <div class="card" style="text-align:center"><div style="font-size:28px;color:#67c23a">{{fbStats.approved||0}}</div><div>已通过</div></div>
+    <div class="card" style="text-align:center"><div style="font-size:28px;color:#f56c6c">{{fbStats.rejected||0}}</div><div>已驳回</div></div>
+    <div class="card" style="text-align:center"><div style="font-size:28px;color:#409eff">{{fbStats.implemented||0}}</div><div>已实现</div></div>
+   </div>
+  </div>
+ </div>`,
+ setup(){
+  const fbStats=ref({});
+  const load=async()=>{try{const r=await api.get('/feedbacks/stats/summary');fbStats.value=r.data;}catch(e){/* ignore */}};
+  onMounted(load);
+  return {fbStats};
+ }
+};
+
+const Layout={
+ template:`<el-container style="height:100vh">
+  <el-header>
+   <div style="font-weight:700;font-size:18px">TaskHub</div>
+   <el-menu mode="horizontal" :router="false" :default-active="$route.path" style="flex:1;margin-left:24px">
+    <el-menu-item index="/" @click="$router.push('/')">任务看板</el-menu-item>
+    <el-menu-item index="/my-tasks" @click="$router.push('/my-tasks')">我的任务</el-menu-item>
+    <el-menu-item index="/feedbacks" @click="$router.push('/feedbacks')">反馈建议</el-menu-item>
+    <el-menu-item index="/dashboard" @click="$router.push('/dashboard')">统计面板</el-menu-item>
+   </el-menu>
+   <div style="display:flex;align-items:center;gap:12px">
+    <span>{{auth.user.value?.display_name}}</span>
+    <el-button size="small" @click="auth.logout()">退出</el-button>
+   </div>
+  </el-header>
+  <el-main style="padding:0;background:#f5f7fa;overflow:auto">
+   <router-view></router-view>
+  </el-main>
+ </el-container>`,
+ setup(){const auth=useAuth();return {auth};}
+};
+
+const routes=[
+ {path:'/login',component:Login,meta:{public:true}},
+ {path:'/',component:Layout,children:[
+  {path:'',component:TaskBoard},
+  {path:'tasks/new',component:TaskNew},
+  {path:'tasks/:id',component:TaskDetail},
+  {path:'my-tasks',component:MyTasks},
+  {path:'feedbacks',component:FeedbackBoard},
+  {path:'feedbacks/new',component:FeedbackSubmit},
+  {path:'feedbacks/review',component:FeedbackReview},
+  {path:'dashboard',component:Dashboard},
+ ]}
+];
+const router=createRouter({history:createWebHashRoute(),routes});
+router.beforeEach((to,from,next)=>{const t=localStorage.getItem('token');if(!to.meta.public&&!t){next('/login');}else{next();}});
+
+const App={setup(){const auth=useAuth();onMounted(()=>auth.load());return {};},template:'<router-view></router-view>'};
+createApp(App).use(router).use(ElementPlus).mount('#app');
+</script>
+</body>
+</html>

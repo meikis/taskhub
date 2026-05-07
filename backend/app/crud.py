@@ -106,6 +106,62 @@ def create_task_log(
     db.refresh(log)
     return log
 
+# ========== 反馈 CRUD ==========
+def create_feedback(db: Session, feedback: "FeedbackCreate", submitter_id: int) -> "Feedback":
+    from app.models import Feedback
+    db_fb = Feedback(
+        title=feedback.title,
+        description=feedback.description,
+        category=feedback.category,
+        submitter_id=submitter_id,
+    )
+    db.add(db_fb)
+    db.commit()
+    db.refresh(db_fb)
+    return db_fb
+
+def get_feedback(db: Session, feedback_id: int) -> Optional["Feedback"]:
+    from app.models import Feedback
+    return db.exec(select(Feedback).where(Feedback.id == feedback_id)).first()
+
+def list_feedbacks(
+    db: Session,
+    status: Optional[str] = None,
+    category: Optional[str] = None,
+    submitter_id: Optional[int] = None,
+) -> List["Feedback"]:
+    from app.models import Feedback
+    query = select(Feedback)
+    if status:
+        query = query.where(Feedback.status == status)
+    if category:
+        query = query.where(Feedback.category == category)
+    if submitter_id is not None:
+        query = query.where(Feedback.submitter_id == submitter_id)
+    query = query.order_by(desc(Feedback.created_at))
+    return db.exec(query).all()
+
+def review_feedback(
+    db: Session,
+    db_fb: "Feedback",
+    reviewer_id: int,
+    status: str,
+    priority: Optional[str],
+    review_comment: Optional[str],
+) -> "Feedback":
+    from datetime import datetime
+    db_fb.status = status
+    db_fb.reviewer_id = reviewer_id
+    db_fb.review_at = datetime.utcnow()
+    if priority is not None:
+        db_fb.priority = priority
+    if review_comment is not None:
+        db_fb.review_comment = review_comment
+    db.add(db_fb)
+    db.commit()
+    db.refresh(db_fb)
+    return db_fb
+
 def list_task_logs(db: Session, task_id: int) -> List[TaskLog]:
     return db.exec(
         select(TaskLog).where(TaskLog.task_id == task_id).order_by(desc(TaskLog.created_at))
